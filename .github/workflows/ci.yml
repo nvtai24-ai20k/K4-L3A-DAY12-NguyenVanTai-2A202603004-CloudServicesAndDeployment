@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run checkpoints
+        env:
+          AGENT_API_KEY: ci-dummy
+          REDIS_URL: "fake://"
+        # test_cp5 gọi vào bản deploy sống; test_bonus_cicd kiểm tra badge của
+        # chính workflow này; test build Docker đã có job `build` lo.
+        run: >
+          pytest tests/ -v -m "not docker"
+          --ignore=tests/test_cp5.py
+          --ignore=tests/test_bonus_cicd.py
+
+  build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t day12-agent:${{ github.sha }} .
+
+      - name: Check image size
+        run: docker images day12-agent:${{ github.sha }}
+
+  deploy:
+    name: Deploy to Railway
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        if: env.RAILWAY_TOKEN != ''
+        with:
+          node-version: "20"
+
+      - name: Install Railway CLI
+        if: env.RAILWAY_TOKEN != ''
+        run: npm install -g @railway/cli
+
+      - name: Deploy
+        if: env.RAILWAY_TOKEN != ''
+        run: railway up --ci --service "${{ vars.RAILWAY_SERVICE }}"
+
+      - name: Skip notice
+        if: env.RAILWAY_TOKEN == ''
+        run: echo "::warning::RAILWAY_TOKEN chưa được cấu hình trong GitHub Secrets — bỏ qua bước deploy."
+
+      - name: Smoke test
+        if: env.RAILWAY_TOKEN != '' && env.PUBLIC_URL != ''
+        run: |
+          sleep 45
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$PUBLIC_URL/health"; then
+              echo
+              curl -fsS "$PUBLIC_URL/ready"
+              exit 0
+            fi
+            echo "health chưa sẵn sàng, thử lại sau 15s ($i/5)"
+            sleep 15
+          done
+          exit 1

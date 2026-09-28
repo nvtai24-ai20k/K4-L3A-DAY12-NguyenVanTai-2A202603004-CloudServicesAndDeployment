@@ -1,3 +1,5 @@
+![CI](https://github.com/nvtai24-ai20k/K4-L3A-DAY12-NguyenVanTai-2A202603004-CloudServicesAndDeployment/actions/workflows/ci.yml/badge.svg)
+
 # K4 — Level 3A, Ngày 12: Hạ Tầng Cloud & Deployment (240 phút)
 
 Đưa một AI agent từ `localhost:8000` lên một địa chỉ công khai mà người khác
